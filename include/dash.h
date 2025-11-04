@@ -46,4 +46,16 @@ extern struct ecu_dash2_bms_info_t     bmsInfo;
 extern struct ecu_dash2_cooling_t      coolingStatus;
 
 
-#endif // DASH_H
+// Function declarations
+void updateOLED(uint16_t rpm,
+                float batteryPercent,
+                const struct ecu_dash2_fault_status_t &faults,
+                const struct ecu_dash2_car_status_t &carStatus);
+
+void updateNeoPixels(float batteryPercent,
+                     const struct ecu_dash2_fault_status_t &faults);
+
+void toggleNextLED();
+
+
+#endif 

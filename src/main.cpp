@@ -2,11 +2,22 @@
 #include "dash.h"
 #include "ecu_dash2.h"
 #include <string.h>
-#include <stdio.h>      // for snprintf
+#include <stdio.h>     
 #include <FlexCAN_T4.h>
+#include <Adafruit_NeoPixel.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+
 
 // had to put this here for it to compile lolz
 void playRTDAlert();
+
+
+IntervalTimer timer;            
+IntervalTimer ledTimer;           
+bool ecuWakeTriggered = false;    
+unsigned long bootTime = 0;       
 
 // — Definitions of external globals —
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
