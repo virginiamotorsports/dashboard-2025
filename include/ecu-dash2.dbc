@@ -1,0 +1,47 @@
+VERSION "2.0"
+NS_:
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    CAT_DEF_
+    CAT_
+    FILTER
+    BA_DEF_DEF_
+;
+BS_:
+BU_:
+    ECU
+    DASHBOARD
+
+BO_ 256 Motor_Status: 8 ECU
+    SG_ INV_Fast_DC_Bus_Voltage : 8|16@1+ (1,0) [-3276.8|3276.7] "V" Vector__xxx
+    SG_ INV_Fast_Motor_Speed : 24|16@1+ (1,0) [0|65535] "rpm" Vector__XXX
+    SG_ INV_DC_Bus_Current : 40|16@1- (1,0) [-3276.8|3276.7] "A" Vector__XXX
+
+BO_ 512 Fault_Status: 1 ECU
+    SG_ APPS_Fault : 2|1@1+ (1,0) [0|1] "" Vector__XXX
+    SG_ BMSC_Fault : 1|1@1+ (1,0) [0|1] "" Vector__XXX
+    SG_ IMD_Fault : 0|1@1+ (1,0) [0|1] "" Vector__XXX
+    SG_ BPPC_Fault : 3|1@1+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 600 Car_Status: 1 ECU
+    SG_ RTD : 0|1@1+ (1,0) [0|1] "" Vector__XXX
+    SG_ IR_Plus_Signal : 1|1@1+ (1,0) [0|1] "" Vector__XXX
+    SG_ Limp_Mode : 2|1@1+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 700 BMS_Info: 4 ECU
+    SG_ Battery_Percentage : 0|8@1+ (1,0) [0|100] "%" Vector__XXX
+    SG_ Total_Pack_Voltage : 8|16@1+ (0.1,0) [0|1000] "V" Vector__XXX
+    SG_ Highest_Temperature : 24|8@1+ (1,0) [0|150] "C" Vector__XXX
+
+BO_ 800 Cooling: 1 ECU
+    SG_ Cooling_On : 0|1@1+ (1,0) [0|1] "" Vector__XXX
+    SG_ Too_Hot : 1|1@1+ (1,0) [0|1] "" Vector__XXX
+
+BA_DEF_ BU_ "NodeAddress" INT 0 255;
+BA_DEF_DEF_ "NodeAddress" 0;
+
+BA_ "NodeAddress" BU_ ECU 1;
+BA_ "NodeAddress" BU_ DASHBOARD 2;

@@ -5,7 +5,7 @@
 #include <stdio.h>      // for snprintf
 #include <FlexCAN_T4.h>
 
-// Forward declare this so the call inside loop() compiles:
+// had to put this here for it to compile lolz
 void playRTDAlert();
 
 // — Definitions of external globals —
@@ -15,8 +15,9 @@ Adafruit_NeoPixel strip(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 // — CAN state —
 struct ecu_dash2_motor_status_t motorStatus;
 struct ecu_dash2_fault_status_t faultStatus;
-struct ecu_dash2_car_status_t   carStatus;     // renamed from checksStatus
-struct ecu_dash2_cooling_t coolingStatus;
+struct ecu_dash2_car_status_t   carStatus; // renamed from checksStatus
+struct ecu_dash2_cooling_t coolingStatus; 
+struct ecu_dash2_bms_info_t     bmsInfo;
 bool prevRTD = false;
 uint16_t motorRPM = 0;
 float batteryPercent = 0.0f;
@@ -39,13 +40,7 @@ void setup() {
   pinMode(ECU_WAKE_PIN, OUTPUT);
   digitalWrite(ECU_WAKE_PIN, LOW);
   bootTime = millis();
-  batteryStartTime = bootTime;
 
-  for (int i = 0; i < NUM_LEDS; i++) {
-    pinMode(LED_PINS[i], OUTPUT);
-    digitalWrite(LED_PINS[i], LOW);
-  }
-  ledTimer.begin(toggleNextLED, 500000);
 
   strip.begin();
   strip.setBrightness(4);
@@ -59,7 +54,7 @@ void setup() {
   display.setTextSize(2);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.println("Hi Hatcher!");
+  display.println("Starting...");
   display.display();
 
   pinMode(BUZZER_PIN, OUTPUT);
@@ -71,7 +66,12 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Serial logging started");
 
-  
+  //initialize CAN message structs
+  ecu_dash2_motor_status_init(&motorStatus);
+  ecu_dash2_fault_status_init(&faultStatus);
+  ecu_dash2_car_status_init(&carStatus);
+  ecu_dash2_bms_info_init(&bmsInfo);
+  ecu_dash2_cooling_init(&coolingStatus);
 
 }
 
@@ -172,17 +172,10 @@ void playRTDAlert() {
   timer.begin(clearPin, 2000000); // buzz for two seconds
 }
 
-// LED toggle ISR
-void toggleNextLED() {
-  static int last = -1;
-  if (last >= 0) digitalWrite(LED_PINS[last], LOW);
-  digitalWrite(LED_PINS[currentLedIndex], HIGH);
-  last = currentLedIndex;
-  currentLedIndex = (currentLedIndex + 1) % NUM_LEDS;
-}
+
 
 // OLED update
-static const uint16_t MAX_RPM      = 5000;
+static const uint16_t MAX_MPH     = 85;
 static const int     BAR_MAX_WIDTH = 126;
 static const int     RPM_BAR_Y     = 20;
 static const int     BAR_BORDER_H  = 16;
@@ -199,49 +192,34 @@ void updateOLED(uint16_t rpm,
   display.clearDisplay();
 
 
-  // --- Speedometer dial (above bar) ---
-  const int dialX = 20, dialY = 12, dialR = 10;
-  display.drawCircle(dialX, dialY, dialR, SSD1306_WHITE);
-  // needle from 135° at 0 rpm to 45° at MAX_RPM
-  float angleDeg = 135.0f - (rpm / (float)MAX_RPM) * 90.0f;
-  float rad = angleDeg * M_PI / 180.0f;
-  int x2 = dialX + cos(rad) * (dialR - 2);
-  int y2 = dialY + sin(rad) * (dialR - 2);
-  display.drawLine(dialX, dialY, x2, y2, SSD1306_WHITE);
-
   //intialize gear ratio and wheel diameter
   static const float GEAR_RATIO = 3.273f;
   static const float WHEEL_DIAMETER_M = .4064f;
   static const float MPS_TO_MPH = 2.23694f;
 
-  // --- Numeric speed in mph, to right of dial ---
+  // --- Numeric speed in mph ---
   float wheelRps = (rpm / GEAR_RATIO) / 60.0f;            // rev/sec
   float wheelCirc = WHEEL_DIAMETER_M * M_PI;             // m/rev
   float speedMps = wheelRps * wheelCirc;                 // m/s
   int   speedMph = (int)roundf(speedMps * MPS_TO_MPH);   // mph
-  char speedBuf[8];
-  snprintf(speedBuf, sizeof(speedBuf), "%d MPH", speedMph);
-  display.setTextSize(1);
-  display.setCursor(dialX + dialR + 4, dialY - 4);
-  display.print(speedBuf);
+ 
 
-
-  // — apply smoothing for the RPM bar —
-  static float displayRpm = 0.0f;
-  float targetRpm = rpm;
-  float alpha = (targetRpm > displayRpm)
+  // — apply smoothing for the RPM bar —        idk claude and chat say its a good idea i test difference with and without during testing
+  static float displayMph = 0.0f;
+  float targetMph = speedMph;
+  float alpha = (targetMph > displayMph)
                   ? RPM_SMOOTH_RISE
                   : RPM_SMOOTH_FALL;
-  displayRpm += (targetRpm - displayRpm) * alpha;
+  displayMph += (targetMph - displayMph) * alpha;
 
   // set textSize
   int textSize = 2;
   display.setTextSize(textSize);
 
-  // --- RPM text (above bar, centered) ---
+  // --- MPH text (above bar, centered) ---
   display.setTextSize(2);
   char buf[16];
-  snprintf(buf, sizeof(buf), "%u rpm", rpm);
+  snprintf(buf, sizeof(buf), "%d rpm", speedMph);
   int16_t len    = strlen(buf);
   int16_t textW  = len * 6 * 2;             // 6px per char × size 2
   int16_t xText  = (128 - textW) / 2;
@@ -249,9 +227,9 @@ void updateOLED(uint16_t rpm,
   display.setCursor(xText, yText);
   display.print(buf);
 
-  // — RPM bar —
+  // — MPH bar —
   display.drawRect(0, RPM_BAR_Y, 128, BAR_BORDER_H, SSD1306_WHITE);
-  int16_t rpmBarW = (int32_t)displayRpm * BAR_MAX_WIDTH / MAX_RPM;
+  int16_t rpmBarW = (int32_t)displayMph * BAR_MAX_WIDTH / MAX_MPH;
   display.fillRect(1, RPM_BAR_Y + 1, rpmBarW, BAR_FILL_H, SSD1306_WHITE);
    
   //display fault bottom right if any  
@@ -274,25 +252,6 @@ void updateOLED(uint16_t rpm,
   }
 
 
-  // --- Cooling status indicator (top right) ---
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-
-  const char* coolingMsg = nullptr;
-  if (coolingStatus.too_hot) {
-      coolingMsg = "HOT!";
-  } else if (coolingStatus.cooling_on) {
-      coolingMsg = "Cooling";
-  }
-
-  if (coolingMsg) {
-      int16_t textX = 128 - (strlen(coolingMsg) * 6) - 2;  // right-align with 2px padding
-      display.setCursor(textX, 0);
-      display.print(coolingMsg);
-  }
-
-  display.display();
-
 }
 
 void updateNeoPixels(float batteryPercent,
@@ -307,16 +266,16 @@ void updateNeoPixels(float batteryPercent,
     if (i == 0)        r = 255 * pb;
     else if (i <= 2) { r = 255 * pb; g = 150 * pb; }
     else               g = 255 * pb;
-    strip.setPixelColor(4 + i, strip.Color(r, g, b));
+    strip.setPixelColor(5 + i, strip.Color(r, g, b));
   }
 
-  // Critical faults: IMD (15), BSPD (14)
-  if (faults.imd_fault)  strip.setPixelColor(15, strip.Color(255, 0, 0));
-  if (faults.bppc_fault) strip.setPixelColor(14, strip.Color(255, 0, 0));
+  // Critical faults: IMD (13), BSPD (16)
+  if (faults.imd_fault)  strip.setPixelColor(13, strip.Color(255, 0, 0));
+  if (faults.bppc_fault) strip.setPixelColor(16, strip.Color(255, 0, 0));
 
-  // Non-critical faults: APPS (0), BMSC (1)
-  if (faults.apps_fault) strip.setPixelColor(0, strip.Color(255, 150, 0));
-  if (faults.bmsc_fault) strip.setPixelColor(1, strip.Color(255, 150, 0));
+  // Non-critical faults: APPS (14), BMSC (15)
+  if (faults.apps_fault) strip.setPixelColor(14, strip.Color(255, 150, 0));
+  if (faults.bmsc_fault) strip.setPixelColor(15, strip.Color(255, 150, 0));
 
   strip.show();
 }
