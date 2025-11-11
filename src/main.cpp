@@ -9,9 +9,12 @@
 #include <Adafruit_SSD1306.h>
 
 
+void playRTDAlert() {
+  // JARVIS - ENTER READY TO DRIVE
+  digitalWrite(BUZZER_PIN, HIGH);
+  timer.begin(clearPin, 2000); // buzz for two seconds
+}
 
-// had to put this here for it to compile lolz
-void playRTDAlert();
 
 
 IntervalTimer timer;            
@@ -49,7 +52,7 @@ void clearPin() {
 
 void setup() {
   pinMode(ECU_WAKE_PIN, OUTPUT);
-  digitalWrite(ECU_WAKE_PIN, LOW);
+  digitalWrite(ECU_WAKE_PIN, HIGH);  //boot ECU
   bootTime = millis();
 
 
@@ -57,10 +60,9 @@ void setup() {
   strip.setBrightness(4);
   strip.show();
 
-  Wire.begin();
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    while (true);
-  }
+    Serial.println("OLED init failed!");
+}
   display.clearDisplay();
   display.setTextSize(2);
   display.setTextColor(SSD1306_WHITE);
@@ -88,12 +90,8 @@ void setup() {
 
 
 void loop() {
-  unsigned long now = millis();
 
-    // ─── Debug: loop tick ───────────────────────────
-  Serial.print("loop @ ");
-  Serial.print(now);
-  Serial.println(" ms");
+  unsigned long now = millis();
 
   
   // Wake ECU after delay
@@ -116,12 +114,6 @@ void loop() {
       Serial.print(' ');
     }
     Serial.println();
-
-
-    //  Debug: push into last‐IDs buffer 
-    lastCanIds[2] = lastCanIds[1];
-    lastCanIds[1] = lastCanIds[0];
-    lastCanIds[0] = msg.id;
 
 
     switch (msg.id) {
@@ -155,32 +147,23 @@ void loop() {
     }
   }
 
-
-  //  Debug: dump last three CAN IDs 
-  Serial.print("Last IDs = [0x");
-  Serial.print(lastCanIds[0], HEX);
-  Serial.print(", 0x");
-  Serial.print(lastCanIds[1], HEX);
-  Serial.print(", 0x");
-  Serial.print(lastCanIds[2], HEX);
-  Serial.println("]");
+  strip.setPixelColor(13, strip.Color(255, 0, 0));
+  strip.show();
+  delay(2000);
+  strip.clear();
 
 
   updateOLED(motorRPM,
              batteryPercent,
              faultStatus,
              carStatus);
+  display.display();
 
   updateNeoPixels(batteryPercent,
                   faultStatus);
+  strip.show();
 
   delay(10);
-}
-
-void playRTDAlert() {
-  // JARVIS - ENTER READY TO DRIVE
-  digitalWrite(BUZZER_PIN, HIGH);
-  timer.begin(clearPin, 2000000); // buzz for two seconds
 }
 
 
@@ -191,9 +174,6 @@ static const int     BAR_MAX_WIDTH = 126;
 static const int     RPM_BAR_Y     = 20;
 static const int     BAR_BORDER_H  = 16;
 static const int     BAR_FILL_H    = 14;
-// smoothing constants:
-static const float   RPM_SMOOTH_RISE = 0.25f;  // fast rise
-static const float   RPM_SMOOTH_FALL = 0.05f;  // slow fall
 
 void updateOLED(uint16_t rpm,
                 float batteryPercent,
@@ -213,55 +193,30 @@ void updateOLED(uint16_t rpm,
   float wheelCirc = WHEEL_DIAMETER_M * M_PI;             // m/rev
   float speedMps = wheelRps * wheelCirc;                 // m/s
   int   speedMph = (int)roundf(speedMps * MPS_TO_MPH);   // mph
- 
-
-  // — apply smoothing for the RPM bar —        idk claude and chat say its a good idea i test difference with and without during testing
-  static float displayMph = 0.0f;
-  float targetMph = speedMph;
-  float alpha = (targetMph > displayMph)
-                  ? RPM_SMOOTH_RISE
-                  : RPM_SMOOTH_FALL;
-  displayMph += (targetMph - displayMph) * alpha;
+  
 
   // set textSize
   int textSize = 2;
   display.setTextSize(textSize);
+  static float displayMph = 0.0f;
 
-  // --- MPH text (above bar, centered) ---
+
+  // — MPH bar —
+  display.drawRect(0, RPM_BAR_Y, 128, BAR_BORDER_H, SSD1306_WHITE);
+  int16_t rpmBarW = (int32_t)displayMph * BAR_MAX_WIDTH / MAX_MPH;
+  display.fillRect(1, RPM_BAR_Y + 1, rpmBarW, BAR_FILL_H, SSD1306_WHITE);
+
+
+  // --- MPH text  ---
   display.setTextSize(2);
   char buf[16];
-  snprintf(buf, sizeof(buf), "%d rpm", speedMph);
+  snprintf(buf, sizeof(buf), "%d MPH", speedMph);
   int16_t len    = strlen(buf);
   int16_t textW  = len * 6 * 2;             // 6px per char × size 2
   int16_t xText  = (128 - textW) / 2;
   int16_t yText  = RPM_BAR_Y - (8 * 2) - 2;  // 8px char height × size2 + margin
   display.setCursor(xText, yText);
   display.print(buf);
-
-  // — MPH bar —
-  display.drawRect(0, RPM_BAR_Y, 128, BAR_BORDER_H, SSD1306_WHITE);
-  int16_t rpmBarW = (int32_t)displayMph * BAR_MAX_WIDTH / MAX_MPH;
-  display.fillRect(1, RPM_BAR_Y + 1, rpmBarW, BAR_FILL_H, SSD1306_WHITE);
-   
-  //display fault bottom right if any  
-  char fbuf[32] = "";
-  if (faults.imd_fault)  strcat(fbuf, "IMD ");
-  if (faults.bppc_fault) strcat(fbuf, "BPPC ");
-  if (faults.apps_fault) strcat(fbuf, "APPS ");
-  if (faults.bmsc_fault) strcat(fbuf, "BMSC ");
-  // trim trailing space
-  int flen = strlen(fbuf);
-  if (flen > 0 && fbuf[flen-1] == ' ') fbuf[len-1] = '\0';
-
-  if (fbuf[0]) {
-    display.setTextSize(2);
-    int textWidth = strlen(fbuf) * 6;            // 6px per char at size 1
-    int x = 128 - textWidth - 1;                 // 1px padding from right
-    int y = 64 - 8 - 1;                          // 8px tall font + 1px padding
-    display.setCursor(x, y);
-    display.print(fbuf);
-  }
-
 
 }
 
